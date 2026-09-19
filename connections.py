@@ -74,7 +74,7 @@ create table if not exists users (
         step_number integer not null check (step_number > 0),
         instruction text not null,
         photo_file_id varchar(255),
-        timer_seconds integer check (timer_seconds > 0),
+        timer_seconds integer check (timer_seconds >= 0),
         unique (recipe_id, step_number)
     );
 
