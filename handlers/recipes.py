@@ -243,6 +243,9 @@ async def user_recipe(callback: CallbackQuery):
                 InlineKeyboardButton( text="❤️ Add to Favorites", callback_data=f"add_favorite_{recipe_id}")
             ],
             [
+                InlineKeyboardButton(text="👨‍🍳 Start Cooking",callback_data=f"start_cooking_{recipe_id}")
+            ],
+            [
                 InlineKeyboardButton(text="🔙 Back",callback_data="user_recipes")
             ]
     ]
@@ -462,6 +465,9 @@ async def favorite_recipe(callback: CallbackQuery):
                     callback_data=f"remove_favorite_{recipe_id}"
                 )
             ],
+            [
+                InlineKeyboardButton(text="👨‍🍳 Start Cooking",callback_data=f"start_cooking_{recipe_id}")
+                        ],
             [
                 InlineKeyboardButton(
                     text="🔙 Back",
@@ -971,3 +977,271 @@ async def toggle_notifications(callback: CallbackQuery):
     )
 
     await callback.answer("✅ Settings updated.")
+
+
+
+# cooking
+
+
+@router.callback_query(F.data.regexp(r"^start_cooking_\d+$"))
+async def start_cooking(callback: CallbackQuery):
+    recipe_id = int(
+        callback.data.split("_")[-1]
+    )
+
+    conn = await get_connection()
+
+    user = await conn.fetchrow(
+        """
+        select id
+        from users
+        where telegram_id = $1
+        """,
+        callback.from_user.id
+    )
+
+    if not user:
+        await conn.close()
+        await callback.answer("User not found.")
+        return
+
+    recipe = await conn.fetchrow(
+        """
+        select name
+        from recipes
+        where id = $1
+        """,
+        recipe_id
+    )
+
+    if not recipe:
+        await conn.close()
+        await callback.answer("Recipe not found.")
+        return
+
+    steps = await conn.fetch(
+        """
+        select step_number, instruction, photo_file_id, timer_seconds
+        from steps
+        where recipe_id = $1
+        order by step_number
+        """,
+        recipe_id
+    )
+
+    if not steps:
+        await conn.close()
+        await callback.answer("This recipe has no steps yet.")
+        return
+
+    session = await conn.fetchrow(
+        """
+        insert into cooking_sessions (
+            user_id,
+            recipe_id,
+            current_step,
+            status
+        )
+        values ($1, $2, 1, 'active')
+        returning id
+        """,
+        user["id"],
+        recipe_id
+    )
+
+    await conn.close()
+
+    step = steps[0]
+
+    text = (
+        f"👨‍🍳 {recipe['name']}\n\n"
+        f"Step {step['step_number']}\n"
+        f"{step['instruction']}\n\n"
+    )
+
+    if step["timer_seconds"] > 0:
+        minutes = step["timer_seconds"] // 60
+        text += f"⏱️ Timer: {minutes} min"
+
+    await callback.message.answer(text)
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➡️ Next Step",
+                    callback_data=f"next_step_{session['id']}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🛑 Stop Cooking",
+                    callback_data=f"stop_cooking_{session['id']}"
+                )
+            ]
+        ]
+    )
+
+    if step["photo_file_id"]:
+        await callback.message.answer_photo(
+            step["photo_file_id"],
+            reply_markup=keyboard
+        )
+    else:
+        await callback.message.answer(
+            "No photo for this step.",
+            reply_markup=keyboard
+        )
+
+    await callback.answer()
+
+
+
+@router.callback_query(F.data.regexp(r"^next_step_\d+$"))
+async def next_step(callback: CallbackQuery):
+    session_id = int(
+        callback.data.split("_")[-1]
+    )
+
+    conn = await get_connection()
+
+    session = await conn.fetchrow(
+        """
+        select recipe_id, current_step
+        from cooking_sessions
+        where id = $1
+        and status = 'active'
+        """,
+        session_id
+    )
+
+    if not session:
+        await conn.close()
+        await callback.answer("Cooking session not found.")
+        return
+
+    next_step_number = session["current_step"] + 1
+
+    step = await conn.fetchrow(
+        """
+        select step_number, instruction, photo_file_id, timer_seconds
+        from steps
+        where recipe_id = $1
+        and step_number = $2
+        """,
+        session["recipe_id"],
+        next_step_number
+    )
+
+    if not step:
+        await conn.execute(
+            """
+            update cooking_sessions
+            set status = 'completed',
+                finished_at = current_timestamp
+            where id = $1
+            """,
+            session_id
+        )
+
+        await conn.close()
+
+        await callback.message.answer(
+            "🎉 Cooking completed!\n\n"
+            "✅ You finished the recipe."
+        )
+
+        await callback.answer("🎉 Recipe completed!")
+        return
+
+    await conn.execute(
+        """
+        update cooking_sessions
+        set current_step = $1
+        where id = $2
+        """,
+        next_step_number,
+        session_id
+    )
+
+    recipe = await conn.fetchrow(
+        """
+        select name
+        from recipes
+        where id = $1
+        """,
+        session["recipe_id"]
+    )
+
+    await conn.close()
+
+    text = (
+        f"👨‍🍳 {recipe['name']}\n\n"
+        f"Step {step['step_number']}\n"
+        f"{step['instruction']}\n\n"
+    )
+
+    if step["timer_seconds"] > 0:
+        minutes = step["timer_seconds"] // 60
+        text += f"⏱️ Timer: {minutes} min"
+
+    await callback.message.answer(text)
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➡️ Next Step",
+                    callback_data=f"next_step_{session_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🛑 Stop Cooking",
+                    callback_data=f"stop_cooking_{session_id}"
+                )
+            ]
+        ]
+    )
+
+    if step["photo_file_id"]:
+        await callback.message.answer_photo(
+            step["photo_file_id"],
+            reply_markup=keyboard
+        )
+    else:
+        await callback.message.answer(
+            "No photo for this step.",
+            reply_markup=keyboard
+        )
+
+    await callback.answer()
+
+
+
+@router.callback_query(F.data.regexp(r"^stop_cooking_\d+$"))
+async def stop_cooking(callback: CallbackQuery):
+    session_id = int(
+        callback.data.split("_")[-1]
+    )
+
+    conn = await get_connection()
+
+    await conn.execute(
+        """
+        update cooking_sessions
+        set status = 'stopped',
+            finished_at = current_timestamp
+        where id = $1
+        """,
+        session_id
+    )
+
+    await conn.close()
+
+    await callback.message.edit_text(
+        "🛑 Cooking stopped.\n\n"
+        "Your session was saved in History."
+    )
+
+    await callback.answer("Cooking stopped.")
