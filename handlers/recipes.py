@@ -578,3 +578,220 @@ async def back_favorites(callback: CallbackQuery):
     )
 
     await callback.answer()
+
+
+# my recipes
+
+
+@router.message(F.text == "📖 My Recipes")
+async def my_recipes(message: Message):
+    conn = await get_connection()
+
+    user = await conn.fetchrow(
+        """
+        select id
+        from users
+        where telegram_id = $1
+        """,
+        message.from_user.id
+    )
+
+    if not user:
+        await conn.close()
+        await message.answer("❌ User not found.")
+        return
+
+    recipes = await conn.fetch(
+        """
+        select id, name
+        from recipes
+        where created_by = $1
+        order by id
+        """,
+        user["id"]
+    )
+
+    await conn.close()
+
+    if not recipes:
+        await message.answer(
+            "📖 My Recipes\n\n"
+            "You haven't created any recipes yet."
+        )
+        return
+
+    keyboard = []
+
+    for recipe in recipes:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"🍳 {recipe['name']}",
+                callback_data=f"my_recipe_{recipe['id']}"
+            )
+        ])
+
+    await message.answer(
+        "📖 Your Recipes:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        )
+    )
+
+
+@router.callback_query(
+    F.data.regexp(r"^my_recipe_\d+$")
+)
+async def my_recipe(callback: CallbackQuery):
+    recipe_id = int(
+        callback.data.split("_")[-1]
+    )
+
+    conn = await get_connection()
+
+    recipe = await conn.fetchrow(
+        """
+        select
+            r.name,
+            r.description,
+            r.cooking_time_minutes,
+            r.difficulty,
+            r.servings,
+            c.name as category_name
+        from recipes r
+        join categories c
+            on c.id = r.category_id
+        where r.id = $1
+        """,
+        recipe_id
+    )
+
+    ingredients = await conn.fetch(
+        """
+        select name, amount, unit
+        from ingredients
+        where recipe_id = $1
+        order by id
+        """,
+        recipe_id
+    )
+
+    steps = await conn.fetch(
+        """
+        select step_number, instruction, timer_seconds
+        from steps
+        where recipe_id = $1
+        order by step_number
+        """,
+        recipe_id
+    )
+
+    await conn.close()
+
+    if not recipe:
+        await callback.answer("Recipe not found.")
+        return
+
+    text = (
+        f"🍳 {recipe['name']}\n\n"
+        f"📂 Category: {recipe['category_name']}\n"
+        f"📝 {recipe['description']}\n"
+        f"🕒 Cooking time: {recipe['cooking_time_minutes']} min\n"
+        f"⭐ Difficulty: {recipe['difficulty']}\n"
+        f"🍽️ Servings: {recipe['servings']}\n\n"
+        f"🥕 Ingredients:\n"
+    )
+
+    for ingredient in ingredients:
+        unit = ingredient["unit"] or ""
+
+        text += (
+            f"• {ingredient['name']} "
+            f"{ingredient['amount']} {unit}\n"
+        )
+
+    text += "\n👨‍🍳 Steps:\n"
+
+    for step in steps:
+        text += (
+            f"\n{step['step_number']}. "
+            f"{step['instruction']}"
+        )
+
+        if step["timer_seconds"] > 0:
+            minutes = step["timer_seconds"] // 60
+            text += f" ⏱️ {minutes} min"
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔙 Back",
+                    callback_data="back_my_recipes"
+                )
+            ]
+        ]
+    )
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=keyboard
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_my_recipes")
+async def back_my_recipes(callback: CallbackQuery):
+    conn = await get_connection()
+
+    user = await conn.fetchrow(
+        """
+        select id
+        from users
+        where telegram_id = $1
+        """,
+        callback.from_user.id
+    )
+
+    if not user:
+        await conn.close()
+        await callback.answer("User not found.")
+        return
+
+    recipes = await conn.fetch(
+        """
+        select id, name
+        from recipes
+        where created_by = $1
+        order by id
+        """,
+        user["id"]
+    )
+
+    await conn.close()
+
+    if not recipes:
+        await callback.message.edit_text(
+            "📖 You haven't created any recipes yet."
+        )
+        await callback.answer()
+        return
+
+    keyboard = []
+
+    for recipe in recipes:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"🍳 {recipe['name']}",
+                callback_data=f"my_recipe_{recipe['id']}"
+            )
+        ])
+
+    await callback.message.edit_text(
+        "📖 Your Recipes:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        )
+    )
+
+    await callback.answer()
