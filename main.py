@@ -5,6 +5,7 @@ from connections import init_tables
 from handlers.start import router as start_router
 from handlers.admin import router as admin_router
 from aiogram.fsm.storage.memory import MemoryStorage
+from handlers.recipes import router as recipes_router
 
 async def main():
     await init_tables()
@@ -14,6 +15,7 @@ async def main():
 
     dp.include_router(start_router)
     dp.include_router(admin_router)
+    dp.include_router(recipes_router)
 
     await dp.start_polling(bot)
 
