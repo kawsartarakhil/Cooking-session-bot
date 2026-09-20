@@ -867,3 +867,107 @@ async def history(message: Message):
 
 
 
+# settings
+
+
+@router.message(F.text == "⚙️ Settings")
+async def settings(message: Message):
+    conn = await get_connection()
+
+    user = await conn.fetchrow(
+        """
+        select notifications_enabled
+        from users
+        where telegram_id = $1
+        """,
+        message.from_user.id
+    )
+
+    await conn.close()
+
+    if not user:
+        await message.answer("❌ User not found.")
+        return
+
+    if user["notifications_enabled"]:
+        status = "🔔 Notifications: ON"
+        button_text = "🔕 Turn Off Notifications"
+    else:
+        status = "🔕 Notifications: OFF"
+        button_text = "🔔 Turn On Notifications"
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=button_text,
+                    callback_data="toggle_notifications"
+                )
+            ]
+        ]
+    )
+
+    await message.answer(
+        f"⚙️ Settings\n\n"
+        f"{status}",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "toggle_notifications")
+async def toggle_notifications(callback: CallbackQuery):
+    conn = await get_connection()
+
+    user = await conn.fetchrow(
+        """
+        select notifications_enabled
+        from users
+        where telegram_id = $1
+        """,
+        callback.from_user.id
+    )
+
+    if not user:
+        await conn.close()
+        await callback.answer("User not found.")
+        return
+
+    new_status = not user["notifications_enabled"]
+
+    await conn.execute(
+        """
+        update users
+        set notifications_enabled = $1
+        where telegram_id = $2
+        """,
+        new_status,
+        callback.from_user.id
+    )
+
+    await conn.close()
+
+    if new_status:
+        status = "🔔 Notifications: ON"
+        button_text = "🔕 Turn Off Notifications"
+    else:
+        status = "🔕 Notifications: OFF"
+        button_text = "🔔 Turn On Notifications"
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=button_text,
+                    callback_data="toggle_notifications"
+                )
+            ]
+        ]
+    )
+
+    await callback.message.edit_text(
+        f"⚙️ Settings\n\n"
+        f"{status}",
+        reply_markup=keyboard
+    )
+
+    await callback.answer("✅ Settings updated.")
