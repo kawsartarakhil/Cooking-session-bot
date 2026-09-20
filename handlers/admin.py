@@ -2126,17 +2126,11 @@ async def save_edit_step_timer(message: Message, state: FSMContext):
         "✅ Step timer updated.",
         reply_markup=edit_recipe_keyboard()
     )
-    
-@router.callback_query(
-    F.data.regexp(r"^delete_step_\d+$")
-)
-async def delete_step(
-    callback: CallbackQuery,
-    state: FSMContext
-):
-    step_id = int(
-        callback.data.split("_")[-1]
-    )
+
+ #delete   
+@router.callback_query(F.data.regexp(r"^delete_step_\d+$"))
+async def delete_step(callback: CallbackQuery,state: FSMContext):
+    step_id = int(callback.data.split("_")[-1])
 
     data = await state.get_data()
 
@@ -2188,10 +2182,7 @@ async def delete_step(
 # back buttons
 
 @router.callback_query(F.data == "edit_back_edit_menu")
-async def edit_back_edit_menu(
-    callback: CallbackQuery,
-    state: FSMContext
-):
+async def edit_back_edit_menu(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
 
     if "edit_recipe_id" not in data:
