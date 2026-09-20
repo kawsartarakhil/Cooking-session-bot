@@ -795,3 +795,75 @@ async def back_my_recipes(callback: CallbackQuery):
     )
 
     await callback.answer()
+
+
+
+
+# history
+
+
+@router.message(F.text == "🕐 History")
+async def history(message: Message):
+    conn = await get_connection()
+
+    user = await conn.fetchrow(
+        """
+        select id
+        from users
+        where telegram_id = $1
+        """,
+        message.from_user.id
+    )
+
+    if not user:
+        await conn.close()
+        await message.answer("❌ User not found.")
+        return
+
+    sessions = await conn.fetch(
+        """
+        select
+            cs.id,
+            r.name,
+            cs.status,
+            cs.started_at
+        from cooking_sessions cs
+        join recipes r
+            on r.id = cs.recipe_id
+        where cs.user_id = $1
+        order by cs.started_at desc
+        """,
+        user["id"]
+    )
+
+    await conn.close()
+
+    if not sessions:
+        await message.answer(
+            "🕐 History\n\n"
+            "You haven't cooked any recipes yet."
+        )
+        return
+
+    text = "🕐 Cooking History\n\n"
+
+    for session in sessions:
+        if session["status"] == "completed":
+            status = "✅ Completed"
+        elif session["status"] == "stopped":
+            status = "🛑 Stopped"
+        elif session["status"] == "paused":
+            status = "⏸️ Paused"
+        else:
+            status = "🍳 Active"
+
+        text += (
+            f"🍳 {session['name']}\n"
+            f"{status}\n"
+            f"📅 {session['started_at'].strftime('%Y-%m-%d %H:%M')}\n\n"
+        )
+
+    await message.answer(text)
+
+
+
